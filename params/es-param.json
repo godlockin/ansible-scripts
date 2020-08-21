@@ -1,0 +1,13 @@
+{
+    "clusterType": "logs",
+    "clusterName": "ms-logs-cluster",
+    "esVersion": "6.8.10",
+    "nodeType": "prd",
+    "masterNode": "true",
+    "dataNode": "true",
+    "clusterNodes": "\"192.168.100.1\",\"192.168.100.2\"",
+    "masterNodes": "192.168.100.1",
+    "mountPoint": "/mnt/disk1",
+    "mountUrl": "some_path",
+    "kbanaMonitorEsHost": "192.168.100.1"
+}
