@@ -1,0 +1,82 @@
+- hosts: all
+  remote_user: root
+  strategy: free
+  vars:
+    local_ip: "{{ansible_default_ipv4['address']}}"
+    node_num: "{{ local_ip | regex_replace('([0-9]{1,3}\\.){3}') }}"
+    mem_num: "{{ ((ansible_memtotal_mb / 1954) if (ansible_memtotal_mb <= 62528) else 32) | int }}"
+
+  tasks:
+    - name: install nfs related package
+      yum:
+        name:
+          - nfs-utils
+          - rpcbind
+        state: present
+    - name: check mnt point
+      shell: ls /mnt/disk1/{{ clusterType }}
+      ignore_errors: True
+      register: mnt_exists
+    - name: mkdir mnt point
+      file:
+        path: /mnt/disk1/{{ clusterType }}
+        state: touch
+        mode: '0755'
+      when: mnt_exists == False
+    - name: mount dir
+      mount:
+        path: '{{ mountPoint }}/{{ clusterType }}'
+        src: '{{ mountUrl }}/{{ clusterType }}'
+        fstype:  nfs
+        opts:  vers=4,minorversion=0,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,_netdev,noresvport
+        state: mounted
+    - name: app deploy
+      synchronize:
+        src: /Users/stevenchen/working/sourcecode/ansible/elasticsearch_rpm/{{ esVersion }}/
+        dest: /opt/
+    - name: install es
+      yum: 
+        name: 
+        - /opt/elasticsearch-{{ esVersion }}-x86_64.rpm
+    - name: update /etc/sysctl.conf
+      lineinfile:
+        path: /etc/sysctl.conf
+        regexp: ^vm.max_map_count
+        line: vm.max_map_count=655360
+    - name: add mem lock
+      lineinfile:
+        path: /usr/lib/systemd/system/elasticsearch.service
+        regexp: "^LimitMEMLOCK="
+        line: "LimitMEMLOCK=infinity"
+        insertafter: '\[Service\]'
+    - name: set yml config
+      lineinfile: 
+        path: /etc/elasticsearch/elasticsearch.yml
+        regexp: "{{item.regexp}}"
+        line: "{{item.line}}"
+      with_items: 
+        - {regexp: '^cluster.name: ', line: 'cluster.name: {{ clusterName }}' }
+        - {regexp: '^node.name: ', line: 'node.name: {{ clusterName}}-{{ nodeType }}-{{ node_num }}' }
+        - {regexp: '^network.host: ', line: 'network.host: {{ local_ip }}' }
+        - {regexp: '^node.ml: ', line: 'node.ml: false' }
+        - {regexp: '^node.master: ', line: 'node.master: {{ masterNode }}' }
+        - {regexp: '^node.data: ', line: 'node.data: {{ dataNode }}' }
+        - {regexp: '^xpack.security.enabled: ', line: 'xpack.security.enabled: false' }
+        - {regexp: '^xpack.ml.enabled: ', line: 'xpack.ml.enabled: false' }
+        - {regexp: '^discovery.seed_hosts: ', line: 'discovery.seed_hosts: [{{ clusterNodes }}]' }
+        - {regexp: '^cluster.initial_master_nodes: ', line: 'cluster.initial_master_nodes: [{{ masterNodes }}]' }
+        - {regexp: '^bootstrap.memory_lock: ', line: 'bootstrap.memory_lock: true' }
+        - {regexp: '^path.repo', line: 'path.repo: ["/mnt/disk1/{{ clusterType }}"]' }
+    - name: set jvm config
+      lineinfile:
+        path: /etc/elasticsearch/jvm.options
+        regexp: "{{item.regexp}}"
+        line: "{{item.line}}"
+      with_items: 
+        - {regexp: ^-Xms\Sg$, line: '-Xms{{ mem_num }}g' }
+        - {regexp: ^-Xmx\Sg$, line: '-Xmx{{ mem_num }}g' }
+    - name: start elasticsearch
+      service: 
+        name: elasticsearch
+        enabled: yes
+        state: started
